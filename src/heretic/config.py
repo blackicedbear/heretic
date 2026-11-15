@@ -284,6 +284,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    knn_chunk_size: PositiveInt | None = Field(
+        default=None,
+        description=(
+            "Chunk size for k-NN distance computation in ARA (Arbitrary-Rank Ablation) "
+            "to bound VRAM usage on large prompt datasets. If unset, the modifier's "
+            "configured setting is used."
+        ),
+    )
+
     batch_size: NonNegativeInt = Field(
         default=0,  # auto
         description="Number of input sequences to process in parallel (0 = auto).",

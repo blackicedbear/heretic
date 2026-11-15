@@ -112,6 +112,14 @@ class Settings(BaseModel):
         description="Whether to print the loss value for each L-BFGS optimization step.",
     )
 
+    knn_chunk_size: PositiveInt | None = Field(
+        default=256,
+        description=(
+            "Chunk size for k-NN distance computation in ARA to bound VRAM usage during the "
+            "autograd backward pass on large prompt datasets. Set to null to disable chunking."
+        ),
+    )
+
 
 # For each vector in the 2D-tensor `a`, computes the mean Euclidean distance
 # to the `k` nearest neighbors of the vector among the vectors in the 2D-tensor `b`.
@@ -121,9 +129,9 @@ def mean_distances_to_knn(
     a: Tensor,
     b: Tensor,
     k: int,
-    chunk_size: int = 256,
+    chunk_size: int | None = 256,
 ) -> Tensor:
-    if a.shape[0] <= chunk_size:
+    if chunk_size is None or chunk_size <= 0 or a.shape[0] <= chunk_size:
         distances = torch.cdist(a, b)
         nearest_distances, _ = distances.topk(k, dim=1, largest=False)
         return nearest_distances.mean(1)
@@ -143,6 +151,7 @@ def ara_loss(
     new_good_output: Tensor,
     new_bad_output: Tensor,
     parameters: Parameters,
+    chunk_size: int | None = 256,
 ) -> Tensor:
     # The outputs for "good" prompts should change as little as possible.
     preserve_good_behavior = ((new_good_output - good_output) ** 2).mean()
@@ -154,6 +163,7 @@ def ara_loss(
             new_bad_output,
             good_output,
             parameters.neighbor_count,
+            chunk_size=chunk_size,
         ).mean()
         # Push the outputs for "bad" prompts away from
         # the original outputs for "bad" prompts.
@@ -166,6 +176,7 @@ def ara_loss(
             new_bad_output,
             bad_output,
             parameters.neighbor_count,
+            chunk_size=chunk_size,
         ).mean()
     )
 
@@ -346,6 +357,12 @@ class ARA(Modifier[Parameters]):
                     if bias is not None:
                         bias = bias.detach().float().to(lora_A.device)
 
+                    knn_chunk_size = (
+                        getattr(self.heretic_settings, "knn_chunk_size", None)
+                        if getattr(self.heretic_settings, "knn_chunk_size", None) is not None
+                        else self.settings.knn_chunk_size
+                    )
+
                     def objective(A: Tensor, B: Tensor) -> Tensor:
                         # input @ (W_base + B @ A).T
                         #   = input @ W_base.T + (input @ A.T) @ B.T
@@ -375,6 +392,7 @@ class ARA(Modifier[Parameters]):
                             new_good_output,
                             new_bad_output,
                             parameters,
+                            chunk_size=knn_chunk_size,
                         )
 
                     optimizer = LBFGS(

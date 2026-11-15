@@ -348,6 +348,10 @@ history_size = 10
 # Whether to print the loss value for each L-BFGS optimization step.
 print_loss = false
 
+# Chunk size for k-NN distance matrix computation to bound peak VRAM usage
+# during autograd backward pass on large prompt datasets. Set to null to disable.
+knn_chunk_size = 256
+
 # Dataset of prompts that tend to produce desirable responses.
 [modifier.ARA.good_prompts]
 dataset = "mlabonne/harmless_alpaca"
