@@ -115,10 +115,25 @@ class Settings(BaseModel):
 
 # For each vector in the 2D-tensor `a`, computes the mean Euclidean distance
 # to the `k` nearest neighbors of the vector among the vectors in the 2D-tensor `b`.
-def mean_distances_to_knn(a: Tensor, b: Tensor, k: int) -> Tensor:
-    distances = torch.cdist(a, b)
-    nearest_distances, _ = distances.topk(k, dim=1, largest=False)
-    return nearest_distances.mean(1)
+# Chunking along the row dimension of `a` bounds memory usage during autograd
+# backward pass and avoids out-of-memory spikes on large prompt datasets.
+def mean_distances_to_knn(
+    a: Tensor,
+    b: Tensor,
+    k: int,
+    chunk_size: int = 256,
+) -> Tensor:
+    if a.shape[0] <= chunk_size:
+        distances = torch.cdist(a, b)
+        nearest_distances, _ = distances.topk(k, dim=1, largest=False)
+        return nearest_distances.mean(1)
+
+    results = []
+    for a_chunk in a.split(chunk_size, dim=0):
+        dist_chunk = torch.cdist(a_chunk, b)
+        nearest_chunk, _ = dist_chunk.topk(k, dim=1, largest=False)
+        results.append(nearest_chunk.mean(1))
+    return torch.cat(results, dim=0)
 
 
 # The objective function at the heart of ARA.
@@ -388,6 +403,12 @@ class ARA(Modifier[Parameters]):
                     # per processed weight) and can easily consume tens of GB of VRAM,
                     # causing out-of-memory errors during the subsequent evaluation.
                     optimizer.zero_grad(set_to_none=True)
+
+                    # Explicitly release intermediate tensors and empty cache to prevent
+                    # VRAM accumulation before processing the next module.
+                    del good_input, good_output, bad_input, bad_output, good_product, bad_product, optimizer
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
     def reset_model(self, ctx: Context) -> None:
         model = ctx.get_model()
