@@ -837,8 +837,17 @@ class Model:
                 # so this extracts the input/output at the end of each prompt.
                 # Move to CPU to decouple from device assignments, which can
                 # change between model reloads in multi-GPU configurations.
-                input = inputs[0][:, -1, :].detach().clone().cpu()
-                output = outputs[:, -1, :].detach().clone().cpu()
+                if inputs[0].ndim == 3:
+                    input = inputs[0][:, -1, :]
+                    output = outputs[:, -1, :]
+                elif inputs[0].ndim == 2:
+                    input = inputs[0]
+                    output = outputs
+                else:
+                    raise ValueError("Unexpected activation dimensions")
+                
+                input = input.detach().clone().cpu()
+                output = output.detach().clone().cpu()
 
                 # The modules associated with a component (e.g. expert MLPs)
                 # are not necessarily invoked in order, nor are all of them
